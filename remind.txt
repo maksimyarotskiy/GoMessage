@@ -1,0 +1,1 @@
+в clien.go генерируется id для пользователей -> в RegisterClient(hub.go) эта штука вызывается -> затем вызов в HandleWebSocket(websocket.go) -> и вызов в main.go
