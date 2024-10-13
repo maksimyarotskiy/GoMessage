@@ -22,7 +22,6 @@ func main() {
 	// Создаем новый роутер Gin
 	router := gin.Default()
 
-	// Определяем маршруты
 	router.GET("/", homePage)
 	router.POST("/register", internal.Register) // Регистрируем маршрут для регистрации
 	router.POST("/login", internal.Login)
