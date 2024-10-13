@@ -64,6 +64,7 @@ func Login(c *gin.Context) {
 
 }
 
+// проверка токена, а также удаление префикса, если есть
 func AuthMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		tokenString := c.GetHeader("Authorization")
