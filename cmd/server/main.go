@@ -19,6 +19,8 @@ func main() {
 
 	internal.InitDB()
 
+	internal.DB.AutoMigrate(&internal.User{}, &internal.Room{}, &internal.Message{}, &internal.PrivateMessage{})
+
 	// Создаем новый роутер Gin
 	router := gin.Default()
 
