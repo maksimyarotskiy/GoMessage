@@ -1,12 +1,17 @@
 package internal
 
-import "gorm.io/gorm"
+import (
+	"time"
+
+	"gorm.io/gorm"
+)
 
 type Message struct {
 	gorm.Model
-	RoomID  uint
-	UserID  uint
-	Message string
+	RoomID    uint
+	UserID    uint
+	Message   string
+	Timestamp time.Time
 }
 
 func CreateMessage(roomID, userID uint, message string) error {

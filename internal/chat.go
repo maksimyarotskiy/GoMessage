@@ -3,6 +3,7 @@ package internal
 import (
 	"fmt"
 	"net/http"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/gorilla/websocket"
@@ -41,8 +42,21 @@ func HandleConnections(c *gin.Context) {
 		return
 	}
 	defer conn.Close()
-
+	// конец проверки
 	clients[conn] = true
+
+	history, err := GetMessageHistory()
+	if err == nil {
+		for _, msg := range history {
+			err := conn.WriteJSON(msg)
+			if err != nil {
+				fmt.Println("Error sending message history:", err)
+				conn.Close()
+				delete(clients, conn)
+				return
+			}
+		}
+	}
 
 	for {
 		var msgPayload MessagePayLoad
@@ -55,9 +69,10 @@ func HandleConnections(c *gin.Context) {
 
 		//Сохранение в БД
 		message := Message{
-			UserID:  user.ID,
-			RoomID:  1, // пока одна
-			Message: msgPayload.Message,
+			UserID:    user.ID,
+			RoomID:    1, // пока одна
+			Message:   msgPayload.Message,
+			Timestamp: time.Now(),
 		}
 		if err := SaveMessage(message); err != nil {
 			fmt.Println("Error saving message:", err)
@@ -74,16 +89,22 @@ func SaveMessage(message Message) error {
 	return result.Error
 }
 
+func GetMessageHistory() ([]Message, error) {
+	var message []Message
+	result := DB.Order("timestamp desc").Limit(10).Find(&message)
+	return message, result.Error
+}
+
 // HandleMessages обрабатывает рассылку сообщений
 func HandleMessages() {
 	for {
 		msgPayload := <-broadcast
 
-		formattedMessage := fmt.Sprintf("%s: %s", msgPayload.Username, msgPayload.Message)
+		//formattedMessage := fmt.Sprintf("%s: %s", msgPayload.Username, msgPayload.Message)
 		for client := range clients {
 			err := client.WriteJSON(MessagePayLoad{
 				Username: msgPayload.Username,
-				Message:  formattedMessage,
+				Message:  msgPayload.Message,
 			})
 			if err != nil {
 				fmt.Println("Error writing JSON:", err)
