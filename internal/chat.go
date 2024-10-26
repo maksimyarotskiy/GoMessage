@@ -3,6 +3,7 @@ package internal
 import (
 	"fmt"
 	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -15,12 +16,20 @@ var upgrader = websocket.Upgrader{
 	},
 }
 
-var clients = make(map[*websocket.Conn]bool)
-var broadcast = make(chan MessagePayLoad)
+type Client struct {
+	Conn   *websocket.Conn
+	RoomID uint
+}
+
+var clients = make(map[*Client]bool)
+
+// var broadcast = make(chan MessagePayLoad)
+var roomBroadcast = make(map[uint]chan MessagePayLoad)
 
 type MessagePayLoad struct {
 	Username string `json:"username"`
 	Message  string `json:"message"`
+	RoomID   uint   `json:"room_id"`
 }
 
 func HandleConnections(c *gin.Context) {
@@ -36,23 +45,34 @@ func HandleConnections(c *gin.Context) {
 		return
 	}
 
+	roomID, err := getRoomIDFromRequest(c)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Ivalid room ID"})
+	}
+
 	conn, err := upgrader.Upgrade(c.Writer, c.Request, nil)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Could not upgrade connection"})
 		return
 	}
 	defer conn.Close()
-	// конец проверки
-	clients[conn] = true
 
-	history, err := GetMessageHistory()
+	//clients[conn] = true
+	client := &Client{Conn: conn, RoomID: roomID}
+	clients[client] = true
+
+	history, err := GetRoomMesageHistory(roomID)
 	if err == nil {
 		for _, msg := range history {
-			err := conn.WriteJSON(msg)
+			err := conn.WriteJSON(MessagePayLoad{
+				Username: msg.Username,
+				Message:  msg.Message,
+				RoomID:   roomID,
+			})
 			if err != nil {
 				fmt.Println("Error sending message history:", err)
 				conn.Close()
-				delete(clients, conn)
+				delete(clients, client)
 				return
 			}
 		}
@@ -63,14 +83,15 @@ func HandleConnections(c *gin.Context) {
 		err := conn.ReadJSON(&msgPayload)
 		if err != nil {
 			fmt.Println("Error reading JSON:", err) // Отладка
-			delete(clients, conn)
+			delete(clients, client)
 			return
 		}
 
 		//Сохранение в БД
 		message := Message{
 			UserID:    user.ID,
-			RoomID:    1, // пока одна
+			Username:  user.Username,
+			RoomID:    roomID,
 			Message:   msgPayload.Message,
 			Timestamp: time.Now(),
 		}
@@ -79,8 +100,14 @@ func HandleConnections(c *gin.Context) {
 			continue
 		}
 
-		msgPayload.Username = username.(string)
-		broadcast <- msgPayload
+		if roomBroadcast[roomID] == nil {
+			roomBroadcast[roomID] = make(chan MessagePayLoad)
+			go HandleRoomMessages(roomID)
+		}
+		roomBroadcast[roomID] <- msgPayload
+
+		//msgPayload.Username = username.(string)
+		//broadcast <- msgPayload
 	}
 }
 
@@ -89,28 +116,54 @@ func SaveMessage(message Message) error {
 	return result.Error
 }
 
-func GetMessageHistory() ([]Message, error) {
-	var message []Message
-	result := DB.Order("timestamp desc").Limit(10).Find(&message)
-	return message, result.Error
+// func GetMessageHistory() ([]Message, error) {
+// 	var message []Message
+// 	result := DB.Order("timestamp desc").Limit(10).Find(&message)
+// 	return message, result.Error
+// }
+
+func GetRoomMesageHistory(roomID uint) ([]Message, error) {
+	var messages []Message
+	result := DB.Where("room_id = ?", roomID).Order("timestamp desc").Limit(10).Find(&messages)
+	return messages, result.Error
 }
 
 // HandleMessages обрабатывает рассылку сообщений
-func HandleMessages() {
-	for {
-		msgPayload := <-broadcast
+// func HandleMessages() {
+// 	for {
+// 		msgPayload := <-broadcast
 
-		//formattedMessage := fmt.Sprintf("%s: %s", msgPayload.Username, msgPayload.Message)
+// 		for client := range clients {
+// 			err := client.WriteJSON(MessagePayLoad{
+// 				Username: msgPayload.Username,
+// 				Message:  msgPayload.Message,
+// 			})
+// 			if err != nil {
+// 				fmt.Println("Error writing JSON:", err)
+// 				client.Close()
+// 				delete(clients, client)
+// 			}
+// 		}
+// 	}
+// }
+
+func HandleRoomMessages(roomID uint) {
+	for msgPayload := range roomBroadcast[roomID] {
 		for client := range clients {
-			err := client.WriteJSON(MessagePayLoad{
-				Username: msgPayload.Username,
-				Message:  msgPayload.Message,
-			})
-			if err != nil {
-				fmt.Println("Error writing JSON:", err)
-				client.Close()
-				delete(clients, client)
+			if client.RoomID == roomID {
+				err := client.Conn.WriteJSON(msgPayload)
+				if err != nil {
+					fmt.Println("Error writing JSON:", err)
+					client.Conn.Close()
+					delete(clients, client)
+				}
 			}
+
 		}
 	}
+}
+
+func getRoomIDFromRequest(c *gin.Context) (uint, error) {
+	roomID, err := strconv.ParseUint(c.Query("room_id"), 10, 64)
+	return uint(roomID), err
 }

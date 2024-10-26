@@ -10,6 +10,7 @@ type Message struct {
 	gorm.Model
 	RoomID    uint
 	UserID    uint
+	Username  string
 	Message   string
 	Timestamp time.Time
 }

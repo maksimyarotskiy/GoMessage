@@ -4,8 +4,9 @@ import "gorm.io/gorm"
 
 type Room struct {
 	gorm.Model
-	Name     string `gorm:"unique"`
-	Massages []Message
+	Name        string `gorm:"unique"`
+	Description *string
+	Massages    []Message
 }
 
 func CreateRoom(name string) (*Room, error) {

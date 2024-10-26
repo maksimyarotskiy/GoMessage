@@ -30,7 +30,7 @@ func main() {
 	router.GET("/ws", internal.AuthMiddleware(), internal.HandleConnections) // WebSocket
 
 	// Запускаем обработку сообщений в горутине
-	go internal.HandleMessages()
+	// go internal.HandleMessages()
 
 	port := os.Getenv("PORT")
 	if port == "" {
