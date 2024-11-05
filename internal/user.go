@@ -19,3 +19,11 @@ func GetUserByUsername(username string) (User, error) {
 	result := DB.Where("username = ?", username).First(&user)
 	return user, result.Error
 }
+
+func GetUsernameByID(userID uint) (string, error) {
+	var user User
+	if err := DB.First(&user, userID).Error; err != nil {
+		return "", err
+	}
+	return user.Username, nil
+}

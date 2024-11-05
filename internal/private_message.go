@@ -1,17 +1,21 @@
 package internal
 
-import "gorm.io/gorm"
+import (
+	"time"
+
+	"gorm.io/gorm"
+)
 
 type PrivateMessage struct {
 	gorm.Model
-	SenderId   uint
-	ReceiverID uint
-	Message    string
+	SenderId   uint      `json:"sender_id"`
+	ReceiverID uint      `json:"receiver_id"`
+	Message    string    `json:"message"`
+	Timestamp  time.Time `json:"timestamp"`
 }
 
-func CreatePrivateMessage(senderID uint, receiverID uint, message string) error {
-	privateMsg := PrivateMessage{SenderId: senderID, ReceiverID: receiverID, Message: message}
-	result := DB.Create(&privateMsg)
+func CreatePrivateMessage(message *PrivateMessage) error {
+	result := DB.Create(message)
 	return result.Error
 }
 

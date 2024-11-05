@@ -22,14 +22,89 @@ type Client struct {
 }
 
 var clients = make(map[*Client]bool)
+var privateClients = make(map[uint]*websocket.Conn)
 
-// var broadcast = make(chan MessagePayLoad)
-var roomBroadcast = make(map[uint]chan MessagePayLoad)
+var roomBroadcast = make(map[uint]chan RoomMessagePayload)
 
-type MessagePayLoad struct {
+type RoomMessagePayload struct {
 	Username string `json:"username"`
 	Message  string `json:"message"`
 	RoomID   uint   `json:"room_id"`
+}
+
+func HandlePrivateConnections(c *gin.Context) {
+	username, exists := c.Get("username")
+	if !exists {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Authorization token required"})
+		return
+	}
+
+	user, err := GetUserByUsername(username.(string))
+	if err != nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "User not found"})
+		return
+	}
+
+	receiverID, err := getOtherUserIDFromRequest(c)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid user_id"})
+		return
+	}
+
+	conn, err := upgrader.Upgrade(c.Writer, c.Request, nil)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Could not upgrade connection"})
+		return
+	}
+	defer conn.Close()
+
+	privateClients[user.ID] = conn
+
+	// Получение и отправка истории сообщений
+	history, err := GetPrivateMessages(user.ID, receiverID)
+	if err == nil {
+		for _, msg := range history {
+			err = conn.WriteJSON(msg)
+			if err != nil {
+				fmt.Println("Error sending message history:", err)
+				conn.Close()
+				delete(privateClients, user.ID)
+				return
+			}
+		}
+	}
+
+	for {
+		var msgPayload PrivateMessage
+		err := conn.ReadJSON(&msgPayload)
+		if err != nil {
+			fmt.Println("Error reading JSON:", err)
+			delete(privateClients, user.ID)
+			return
+		}
+
+		//Сохранение в БД
+		msgPayload.SenderId = user.ID
+		msgPayload.ReceiverID = receiverID
+		msgPayload.Timestamp = time.Now()
+
+		err = CreatePrivateMessage(&msgPayload)
+		if err != nil {
+			fmt.Println("Error saving private message:", err)
+			continue
+		}
+
+		// Отправка сообщения получателю, если он подключен
+		if receiverConn, ok := privateClients[receiverID]; ok {
+			err = receiverConn.WriteJSON(msgPayload)
+			if err != nil {
+				fmt.Println("Error sending private message:", err)
+				receiverConn.Close()
+				delete(privateClients, receiverID)
+			}
+		}
+	}
+
 }
 
 func HandleConnections(c *gin.Context) {
@@ -57,14 +132,13 @@ func HandleConnections(c *gin.Context) {
 	}
 	defer conn.Close()
 
-	//clients[conn] = true
 	client := &Client{Conn: conn, RoomID: roomID}
 	clients[client] = true
 
 	history, err := GetRoomMesageHistory(roomID)
 	if err == nil {
 		for _, msg := range history {
-			err := conn.WriteJSON(MessagePayLoad{
+			err := conn.WriteJSON(RoomMessagePayload{
 				Username: msg.Username,
 				Message:  msg.Message,
 				RoomID:   roomID,
@@ -79,7 +153,7 @@ func HandleConnections(c *gin.Context) {
 	}
 
 	for {
-		var msgPayload MessagePayLoad
+		var msgPayload RoomMessagePayload
 		err := conn.ReadJSON(&msgPayload)
 		if err != nil {
 			fmt.Println("Error reading JSON:", err) // Отладка
@@ -101,7 +175,7 @@ func HandleConnections(c *gin.Context) {
 		}
 
 		if roomBroadcast[roomID] == nil {
-			roomBroadcast[roomID] = make(chan MessagePayLoad)
+			roomBroadcast[roomID] = make(chan RoomMessagePayload)
 			go HandleRoomMessages(roomID)
 		}
 		roomBroadcast[roomID] <- msgPayload
@@ -116,36 +190,20 @@ func SaveMessage(message Message) error {
 	return result.Error
 }
 
-// func GetMessageHistory() ([]Message, error) {
-// 	var message []Message
-// 	result := DB.Order("timestamp desc").Limit(10).Find(&message)
-// 	return message, result.Error
-// }
-
 func GetRoomMesageHistory(roomID uint) ([]Message, error) {
 	var messages []Message
 	result := DB.Where("room_id = ?", roomID).Order("timestamp desc").Limit(10).Find(&messages)
 	return messages, result.Error
 }
 
-// HandleMessages обрабатывает рассылку сообщений
-// func HandleMessages() {
-// 	for {
-// 		msgPayload := <-broadcast
-
-// 		for client := range clients {
-// 			err := client.WriteJSON(MessagePayLoad{
-// 				Username: msgPayload.Username,
-// 				Message:  msgPayload.Message,
-// 			})
-// 			if err != nil {
-// 				fmt.Println("Error writing JSON:", err)
-// 				client.Close()
-// 				delete(clients, client)
-// 			}
-// 		}
-// 	}
-// }
+func GetPrivateMessageHistory(userID1, userID2 uint) ([]PrivateMessage, error) {
+	var messages []PrivateMessage
+	result := DB.Where(
+		"(sender_id = ? AND receiver_id = ?) OR (sender_id = ? AND receiver_id = ?)",
+		userID1, userID2, userID2, userID1,
+	).Order("timestamp desc").Limit(50).Find(&messages)
+	return messages, result.Error
+}
 
 func HandleRoomMessages(roomID uint) {
 	for msgPayload := range roomBroadcast[roomID] {
@@ -166,4 +224,9 @@ func HandleRoomMessages(roomID uint) {
 func getRoomIDFromRequest(c *gin.Context) (uint, error) {
 	roomID, err := strconv.ParseUint(c.Query("room_id"), 10, 64)
 	return uint(roomID), err
+}
+
+func getOtherUserIDFromRequest(c *gin.Context) (uint, error) {
+	otherUserID, err := strconv.ParseUint(c.Query("user_id"), 10, 64)
+	return uint(otherUserID), err
 }

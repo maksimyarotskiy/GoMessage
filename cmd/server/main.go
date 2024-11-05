@@ -28,6 +28,7 @@ func main() {
 	router.POST("/register", internal.Register) // Регистрируем маршрут для регистрации
 	router.POST("/login", internal.Login)
 	router.GET("/ws", internal.AuthMiddleware(), internal.HandleConnections) // WebSocket
+	router.GET("/ws/private", internal.AuthMiddleware(), internal.HandlePrivateConnections)
 
 	// Запускаем обработку сообщений в горутине
 	// go internal.HandleMessages()
