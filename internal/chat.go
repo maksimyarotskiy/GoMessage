@@ -123,6 +123,13 @@ func HandleConnections(c *gin.Context) {
 	roomID, err := getRoomIDFromRequest(c)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Ivalid room ID"})
+		return
+	}
+
+	room, err := GetRoomByID(roomID)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Room not found"})
+		return
 	}
 
 	conn, err := upgrader.Upgrade(c.Writer, c.Request, nil)
@@ -132,16 +139,16 @@ func HandleConnections(c *gin.Context) {
 	}
 	defer conn.Close()
 
-	client := &Client{Conn: conn, RoomID: roomID}
+	client := &Client{Conn: conn, RoomID: room.ID}
 	clients[client] = true
 
-	history, err := GetRoomMesageHistory(roomID)
+	history, err := GetRoomMesageHistory(room.ID)
 	if err == nil {
 		for _, msg := range history {
 			err := conn.WriteJSON(RoomMessagePayload{
 				Username: msg.Username,
 				Message:  msg.Message,
-				RoomID:   roomID,
+				RoomID:   room.ID,
 			})
 			if err != nil {
 				fmt.Println("Error sending message history:", err)
@@ -165,7 +172,7 @@ func HandleConnections(c *gin.Context) {
 		message := Message{
 			UserID:    user.ID,
 			Username:  user.Username,
-			RoomID:    roomID,
+			RoomID:    room.ID,
 			Message:   msgPayload.Message,
 			Timestamp: time.Now(),
 		}
@@ -174,11 +181,11 @@ func HandleConnections(c *gin.Context) {
 			continue
 		}
 
-		if roomBroadcast[roomID] == nil {
-			roomBroadcast[roomID] = make(chan RoomMessagePayload)
-			go HandleRoomMessages(roomID)
+		if roomBroadcast[room.ID] == nil {
+			roomBroadcast[room.ID] = make(chan RoomMessagePayload)
+			go HandleRoomMessages(room.ID)
 		}
-		roomBroadcast[roomID] <- msgPayload
+		roomBroadcast[room.ID] <- msgPayload
 
 		//msgPayload.Username = username.(string)
 		//broadcast <- msgPayload

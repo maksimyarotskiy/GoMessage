@@ -43,7 +43,7 @@ func Login(c *gin.Context) {
 	}
 
 	//генерация JWT
-	expirationTime := time.Now().Add(24 * time.Hour)
+	expirationTime := time.Now().AddDate(0, 1, 0) // time.Now().Add(24 * time.Hour)
 	claims := &Claims{
 		Username: loginData.Username,
 		StandardClaims: jwt.StandardClaims{
