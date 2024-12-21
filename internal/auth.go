@@ -43,7 +43,7 @@ func Login(c *gin.Context) {
 	}
 
 	//генерация JWT
-	expirationTime := time.Now().Add(24 * time.Hour)
+	expirationTime := time.Now().AddDate(0, 1, 0) // time.Now().Add(24 * time.Hour)
 	claims := &Claims{
 		Username: loginData.Username,
 		StandardClaims: jwt.StandardClaims{
@@ -64,12 +64,15 @@ func Login(c *gin.Context) {
 
 }
 
+// проверка токена, а также удаление префикса, если есть
 func AuthMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		tokenString := c.GetHeader("Authorization")
+		fmt.Println("Raw Authorization header:", tokenString)
 
 		// Удаляем префикс "Bearer " (если есть) независимо от его наличия
 		tokenString = strings.TrimPrefix(tokenString, "Bearer ")
+		fmt.Println("Token without Bearer:", tokenString)
 
 		if tokenString == "" {
 			c.JSON(http.StatusUnauthorized, gin.H{"error": "Authorization header missing"})
@@ -87,6 +90,7 @@ func AuthMiddleware() gin.HandlerFunc {
 			return
 		}
 		fmt.Println("Received token:", tokenString)
+		fmt.Println("Token is valid, username:", claims.Username)
 		c.Set("username", claims.Username)
 		c.Next()
 	}
